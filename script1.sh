@@ -7,6 +7,7 @@
 #
 # Behaviors:
 #   • Root-phase (EUID=0, no --as-user flag):
+#     0) Cleanup old initramfs in /boot
 #     1) Update system
 #     2) Install sudo & git
 #     3) Enable wheel NOPASSWD
@@ -25,20 +26,29 @@ trap 'error "Unexpected error on line $LINENO."; exit 1' ERR
 trap 'info "Interrupted by user."; exit 130' INT
 
 # ——— Logging ———
-info ()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
-warn ()  { printf "\033[1;33m[WARN]\033[0m  %s\n" "$*"; }
+info  () { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
+warn  () { printf "\033[1;33m[WARN]\033[0m  %s\n" "$*"; }
 error () { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*" >&2; }
 
 # ——— Config ———
 BOOT_USER="asimas"
-SHELL_PATH="/bin/bash"
+USER_SHELL="/bin/bash"
 SSH_EMAIL="austin@simas.io"
 PRIVATE_REPO="git@github.com:ajsimas/arch-bootstrap.git"
-SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
 # ——— Root-phase ———
 if [[ $EUID -eq 0 && "${1:-}" != "--as-user" ]]; then
   info "== Root-phase starting =="
+
+  info "0) Cleaning up old initramfs images in /boot…"
+  if mountpoint -q /boot; then
+    rm -f /boot/initramfs-linux-fallback.img \
+          /boot/initramfs-linux-*.img.old \
+          /boot/initramfs-linux-*.img.pacsave || true
+    info "Old initramfs files removed."
+  else
+    warn "/boot not mounted separately; skipping cleanup."
+  fi
 
   info "1) Updating package database & system…"
   pacman -Syu --noconfirm
@@ -56,20 +66,22 @@ EOF
   if id "$BOOT_USER" &>/dev/null; then
     warn "User '$BOOT_USER' already exists; skipping creation."
   else
-    useradd -m -G wheel -s "$SHELL_PATH" "$BOOT_USER"
+    useradd -m -G wheel -s "$USER_SHELL" "$BOOT_USER"
     info "Please set a password for '$BOOT_USER':"
     passwd "$BOOT_USER"
   fi
 
   info "Root-phase complete. Switching to user-phase…"
-  # Stream this very script into the new user's shell session
+  # Compute script path now that BASH_SOURCE is available
+  SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+  # Stream this script into the new user's shell
   exec runuser -u "$BOOT_USER" -- bash -s -- --as-user < "$SCRIPT_PATH"
 fi
 
 # ——— User-phase ———
 if [[ "${1:-}" == "--as-user" ]]; then
   if [[ $EUID -eq 0 ]]; then
-    error "Refusing to run user-phase as root."
+    error "User-phase must not run as root."
     exit 1
   fi
   info "== User-phase starting as '$(whoami)' =="
@@ -77,12 +89,12 @@ if [[ "${1:-}" == "--as-user" ]]; then
   info "1) Installing OpenSSH client…"
   sudo pacman -S --noconfirm --needed openssh
 
-  info "2) Generating SSH key (Ed25519)…"
+  info "2) Generating SSH key (Ed25519) if missing…"
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
   KEY="$HOME/.ssh/id_ed25519"
   if [[ -f $KEY ]]; then
-    warn "SSH key already exists at $KEY; skipping keygen."
+    warn "SSH key exists at $KEY; skipping generation."
   else
-    mkdir -p ~/.ssh && chmod 700 ~/.ssh
     ssh-keygen -t ed25519 -C "$SSH_EMAIL" -f "$KEY" -N ""
   fi
 
@@ -91,7 +103,7 @@ if [[ "${1:-}" == "--as-user" ]]; then
   ssh-add "$KEY"
 
   echo
-  info "4) Copy the following public key into GitHub → Settings → SSH and GPG keys:"
+  info "4) Copy this public key into GitHub → Settings → SSH and GPG keys:"
   cat "${KEY}.pub"
   echo
   read -rp "Press Enter once added to GitHub…"
@@ -107,10 +119,10 @@ if [[ "${1:-}" == "--as-user" ]]; then
   cd "$HOME/arch-bootstrap"
   sudo ./bootstrap.sh
 
-  info "All done! 🎉 You’re bootstrapped."
+  info "🎉 Bootstrap complete!"
   exit 0
 fi
 
-# ——— Usage error ———
+# ——— Mis-invocation ———
 error "This script must be run as root: ./arch-bootstrap.sh"
 exit 1
