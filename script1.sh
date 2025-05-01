@@ -106,7 +106,7 @@ if [[ "${1:-}" == "--as-user" ]]; then
   info "4) Copy this public key into GitHub → Settings → SSH and GPG keys:"
   cat "${KEY}.pub"
   echo
-  read -rp "Press Enter once added to GitHub…"
+  read -rp "Press Enter once added to GitHub… " </dev/tty
 
   info "5) Cloning your private bootstrap repo…"
   if [[ -d $HOME/arch-bootstrap ]]; then
