@@ -117,7 +117,7 @@ if [[ "${1:-}" == "--as-user" ]]; then
 
   info "Running private repo installer…"
   cd "$HOME/arch-bootstrap"
-  sudo ./bootstrap.sh
+  ./bootstrap.sh
 
   info "🎉 Bootstrap complete!"
   exit 0
